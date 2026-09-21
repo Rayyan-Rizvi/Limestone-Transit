@@ -9,6 +9,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(LIMESTONE_WARNINGS -Wall -Wextra -Wpedantic)
 
 add_library(limestone_lib
+    src/csv.cpp
+    src/time.cpp
     src/version.cpp
 )
 target_include_directories(limestone_lib PUBLIC include)
@@ -28,6 +30,8 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(limestone_tests
+    tests/test_csv.cpp
+    tests/test_time.cpp
     tests/test_version.cpp
 )
 target_link_libraries(limestone_tests PRIVATE limestone_lib GTest::gtest_main)
