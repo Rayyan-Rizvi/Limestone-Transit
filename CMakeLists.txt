@@ -10,6 +10,8 @@ set(LIMESTONE_WARNINGS -Wall -Wextra -Wpedantic)
 
 add_library(limestone_lib
     src/csv.cpp
+    src/feed.cpp
+    src/interner.cpp
     src/time.cpp
     src/version.cpp
 )
@@ -31,6 +33,7 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 add_executable(limestone_tests
     tests/test_csv.cpp
+    tests/test_feed.cpp
     tests/test_time.cpp
     tests/test_version.cpp
 )
