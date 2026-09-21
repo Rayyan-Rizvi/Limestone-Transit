@@ -12,6 +12,7 @@ add_library(limestone_lib
     src/csv.cpp
     src/feed.cpp
     src/interner.cpp
+    src/loader.cpp
     src/time.cpp
     src/version.cpp
 )
@@ -34,11 +35,13 @@ enable_testing()
 add_executable(limestone_tests
     tests/test_csv.cpp
     tests/test_feed.cpp
+    tests/test_loader.cpp
     tests/test_time.cpp
     tests/test_version.cpp
 )
 target_link_libraries(limestone_tests PRIVATE limestone_lib GTest::gtest_main)
 target_compile_options(limestone_tests PRIVATE ${LIMESTONE_WARNINGS})
+target_compile_definitions(limestone_tests PRIVATE LIMESTONE_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
 
 include(GoogleTest)
 gtest_discover_tests(limestone_tests)

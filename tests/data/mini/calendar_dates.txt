@@ -1,0 +1,4 @@
+service_id,date,exception_type
+WEEKDAY,20261013,1
+WEEKDAY,20261014,1
+WEEKDAY,20261012,2

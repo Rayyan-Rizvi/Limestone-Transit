@@ -1,0 +1,4 @@
+stop_id,stop_name,stop_lat,stop_lon
+S1,Union St at University Ave,44.2253,-76.4951
+S2,"Princess St, north side",44.2310,-76.4870
+S3,Cataraqui Centre,44.2550,-76.5721
