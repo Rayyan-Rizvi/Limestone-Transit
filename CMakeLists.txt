@@ -15,6 +15,7 @@ add_library(limestone_lib
     src/journey.cpp
     src/loader.cpp
     src/raptor.cpp
+    src/sweep.cpp
     src/time.cpp
     src/timetable.cpp
     src/transfers.cpp
@@ -22,6 +23,8 @@ add_library(limestone_lib
 )
 target_include_directories(limestone_lib PUBLIC include)
 target_compile_options(limestone_lib PRIVATE ${LIMESTONE_WARNINGS})
+find_package(Threads REQUIRED)
+target_link_libraries(limestone_lib PUBLIC Threads::Threads)
 
 add_executable(limestone tools/main.cpp)
 target_link_libraries(limestone PRIVATE limestone_lib)
@@ -42,6 +45,7 @@ add_executable(limestone_tests
     tests/test_loader.cpp
     tests/test_multisource.cpp
     tests/test_raptor.cpp
+    tests/test_sweep.cpp
     tests/test_time.cpp
     tests/test_transfers.cpp
     tests/test_version.cpp
