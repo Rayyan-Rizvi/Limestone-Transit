@@ -1,3 +1,5 @@
+[![tests](https://github.com/Rayyan-Rizvi/Limestone-Transit/actions/workflows/ci.yml/badge.svg)](https://github.com/Rayyan-Rizvi/Limestone-Transit/actions/workflows/ci.yml)
+
 # Limestone
 
 A public transit routing engine in C++17 for Kingston Transit, built on the RAPTOR algorithm. It plans trips over the city's real GTFS schedule in under a millisecond, and runs full-day accessibility sweeps across a thread pool to measure how reachable Kingston actually is from a given point.
