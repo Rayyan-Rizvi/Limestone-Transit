@@ -115,7 +115,8 @@ The feed is downloaded rather than committed, because the City of Kingston repub
 
 - Stop name lookup resolves to one stop and relies on walking transfers to reach other stops with the same name. That works in Kingston because same-name stops are close together; a city where one name spans a kilometre would need true multi-origin search.
 - No real-time data. The engine uses scheduled times only, so it cannot account for delays or cancellations.
-- Straight-line walking distance with a 1.3 detour factor, not street routing. Trips are assumed not to overtake each other within a pattern, which allows the binary search for the earliest catchable trip.
+- Straight-line walking distance with a 1.3 detour factor, not street routing. 
+- Trips are assumed not to overtake each other within a pattern, which allows the binary search for the earliest catchable trip.
 
 ## Testing
 
