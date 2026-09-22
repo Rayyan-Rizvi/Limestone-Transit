@@ -32,6 +32,7 @@ int print_usage() {
               << "  limestone info FEED_DIR\n"
               << "  limestone stops FEED_DIR QUERY\n"
               << "  limestone route FEED_DIR FROM TO YYYYMMDD HH:MM\n"
+              << "  limestone reach FEED_DIR LAT,LON YYYYMMDD HH:MM\n"
               << "  limestone --version\n"
               << "\n"
               << "FROM and TO may be stop ids or stop names. Quote names with spaces.\n";
@@ -207,6 +208,100 @@ int run_route(const std::string& directory, const std::string& from, const std::
 
 }
 
+bool parse_point(const std::string& text, double& lat, double& lon) {
+    const std::size_t comma = text.find(',');
+    if (comma == std::string::npos) {
+        return false;
+    }
+
+    char* end = nullptr;
+    lat = std::strtod(text.c_str(), &end);
+    if (end != text.c_str() + comma) {
+        return false;
+    }
+
+    lon = std::strtod(text.c_str() + comma + 1, &end);
+    return *end == '\0';
+}
+
+int run_reach(const std::string& directory, const std::string& point,
+              const std::string& date_text, const std::string& time_text) {
+    double lat = 0.0;
+    double lon = 0.0;
+    if (!parse_point(point, lat, lon)) {
+        throw std::runtime_error("point must be LAT,LON with no space, got " + point);
+    }
+    if (date_text.size() != 8) {
+        throw std::runtime_error("date must be YYYYMMDD, got " + date_text);
+    }
+    const int date = std::atoi(date_text.c_str());
+
+    const std::optional<int> departure = limestone::parse_gtfs_time(time_text);
+    if (!departure) {
+        throw std::runtime_error("time must be HH:MM, got " + time_text);
+    }
+
+    const limestone::Feed feed = limestone::load_feed(directory);
+
+    // Starting from every stop within walking range of the point, rather than
+    // the single nearest one, avoids biasing results toward one side of it.
+    constexpr double kOriginRadiusMetres = 500.0;
+    const std::vector<limestone::NearbyStop> nearby =
+        limestone::stops_near(feed, lat, lon, kOriginRadiusMetres);
+    if (nearby.empty()) {
+        throw std::runtime_error("no stops within 500 m of " + point);
+    }
+
+    limestone::Query query;
+    query.target = limestone::kNoTarget;
+    query.departure = *departure;
+    for (const limestone::NearbyStop& stop : nearby) {
+        query.origins.push_back(limestone::Origin{stop.stop, *departure + stop.seconds});
+    }
+
+    const limestone::Timetable timetable = limestone::build_timetable(feed, date);
+    if (timetable.patterns.empty()) {
+        std::cout << "no service runs on " << date << " (check the date range with info)\n";
+        return 1;
+    }
+    const limestone::Transfers transfers = limestone::build_transfers(feed);
+
+    const Clock::time_point started = Clock::now();
+    const limestone::RaptorResult result = limestone::run_raptor(timetable, query, &transfers);
+    const long long query_us = microseconds_since(started);
+
+    const int thresholds[] = {15, 30, 45, 60};
+    int within[] = {0, 0, 0, 0};
+    int unreachable = 0;
+
+    for (const int arrival : result.best) {
+        if (arrival == limestone::kUnreachable) {
+            ++unreachable;
+            continue;
+        }
+        const int minutes = (arrival - query.departure) / 60;
+        for (int i = 0; i != 4; ++i) {
+            if (minutes <= thresholds[i]) {
+                ++within[i];
+            }
+        }
+    }
+
+    const int total = static_cast<int>(feed.stops.size());
+    std::cout << "origin:    " << point << " (" << nearby.size() << " stops within 500 m)\n"
+              << "departing: " << date << " at " << limestone::format_hhmm(query.departure) << '\n'
+              << "query:     " << query_us << " microseconds\n\n";
+
+    for (int i = 0; i != 4; ++i) {
+        const int percent = (within[i] * 100 + total / 2) / total;
+        std::cout << "  within " << thresholds[i] << " min:  " << within[i] << " of " << total
+                  << " stops (" << percent << "%)\n";
+    }
+    std::cout << "  unreachable:    " << unreachable << " stops\n";
+
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         return print_usage();
@@ -228,6 +323,11 @@ int main(int argc, char* argv[]) {
         if (command == "route" && argc == 7) {
             return run_route(argv[2], argv[3], argv[4], argv[5], argv[6]);
         }
+
+        if (command == "reach" && argc == 6) {
+            return run_reach(argv[2], argv[3], argv[4], argv[5]);
+        }
+
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';
         return 1;
