@@ -16,6 +16,7 @@ add_library(limestone_lib
     src/raptor.cpp
     src/time.cpp
     src/timetable.cpp
+    src/transfers.cpp
     src/version.cpp
 )
 target_include_directories(limestone_lib PUBLIC include)
@@ -40,6 +41,7 @@ add_executable(limestone_tests
     tests/test_loader.cpp
     tests/test_raptor.cpp
     tests/test_time.cpp
+    tests/test_transfers.cpp
     tests/test_version.cpp
 )
 target_link_libraries(limestone_tests PRIVATE limestone_lib GTest::gtest_main)

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "limestone/timetable.hpp"
+#include "limestone/transfers.hpp"
 
 namespace limestone {
 
@@ -17,12 +18,14 @@ struct Query {
     int transfer_buffer = 60;
 };
 
-// How a stop was reached: which pattern and trip, boarded at which position.
+// How a stop was reached in a round: either by riding a pattern's trip from
+// board_position, or on foot from walk_from.
 struct Label {
     int arrival = kUnreachable;
     int pattern = -1;
     int trip = -1;
     int board_position = -1;
+    int walk_from = -1;
 };
 
 struct Option {
@@ -35,6 +38,7 @@ struct RaptorResult {
     std::vector<Option> options;
 };
 
-RaptorResult run_raptor(const Timetable& timetable, const Query& query);
+RaptorResult run_raptor(const Timetable& timetable, const Query& query,
+                        const Transfers* transfers = nullptr);
 
 }

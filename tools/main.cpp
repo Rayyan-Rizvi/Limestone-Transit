@@ -12,6 +12,7 @@
 #include "limestone/time.hpp"
 #include "limestone/timetable.hpp"
 #include "limestone/version.hpp"
+#include "limestone/transfers.hpp"
 
 namespace {
 
@@ -124,8 +125,10 @@ int run_route(const std::string& directory, const std::string& from, const std::
         return 1;
     }
 
+    const limestone::Transfers transfers = limestone::build_transfers(feed);
+
     started = Clock::now();
-    const limestone::RaptorResult result = limestone::run_raptor(timetable, query);
+    const limestone::RaptorResult result = limestone::run_raptor(timetable, query, &transfers);
     const long long query_us = microseconds_since(started);
 
     std::cout << "from:      " << from << "  " << feed.stops[query.source].name << '\n'

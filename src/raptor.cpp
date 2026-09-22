@@ -10,20 +10,56 @@ namespace {
 int earliest_trip(const Timetable& timetable, const Pattern& pattern, int position, int ready) {
     int low = 0;
     int high = pattern.trip_count;
-    while (low < high) {
+    while (low != high) {
         const int mid = low + (high - low) / 2;
-        if (timetable.departure(pattern, mid, position) < ready) {
-            low = mid + 1;
-        } else {
+        if (timetable.departure(pattern, mid, position) >= ready) {
             high = mid;
+        } else {
+            low = mid + 1;
         }
     }
-    return low < pattern.trip_count ? low : -1;
+    return low != pattern.trip_count ? low : -1;
+}
+
+void mark(int stop, std::vector<char>& is_marked, std::vector<int>& marked) {
+    if (!is_marked[stop]) {
+        is_marked[stop] = 1;
+        marked.push_back(stop);
+    }
+}
+
+// Walks start only from stops reached by riding in this round, or from the
+// origin, never from the far end of another walk.
+void relax_footpaths(const Transfers& transfers, int target, std::vector<Label>& labels,
+                     std::vector<int>& best, std::vector<char>& is_marked,
+                     std::vector<int>& marked) {
+    const std::size_t reached_by_riding = marked.size();
+
+    for (std::size_t i = 0; i != reached_by_riding; ++i) {
+        const int from = marked[i];
+        if (labels[from].walk_from != -1) {
+            continue;
+        }
+
+        const int leave_at = labels[from].arrival;
+        for (int j = transfers.offsets[from]; j != transfers.offsets[from + 1]; ++j) {
+            const Footpath& path = transfers.paths[j];
+            const int arrival = leave_at + path.seconds;
+            if (arrival >= std::min(best[path.to], best[target])) {
+                continue;
+            }
+
+            labels[path.to] = Label{arrival, -1, -1, -1, from};
+            best[path.to] = arrival;
+            mark(path.to, is_marked, marked);
+        }
+    }
 }
 
 }
 
-RaptorResult run_raptor(const Timetable& timetable, const Query& query) {
+RaptorResult run_raptor(const Timetable& timetable, const Query& query,
+                        const Transfers* transfers) {
     const int stop_count = timetable.stop_count;
 
     RaptorResult result;
@@ -37,10 +73,13 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query) {
 
     result.rounds[0][query.source].arrival = query.departure;
     best[query.source] = query.departure;
-    marked.push_back(query.source);
-    is_marked[query.source] = 1;
+    mark(query.source, is_marked, marked);
 
-    for (int k = 1; k <= query.max_trips && !marked.empty(); ++k) {
+    if (transfers) {
+        relax_footpaths(*transfers, query.target, result.rounds[0], best, is_marked, marked);
+    }
+
+    for (int k = 1; k != query.max_trips + 1 && !marked.empty(); ++k) {
         const std::vector<Label>& previous = result.rounds[k - 1];
         std::vector<Label>& current = result.rounds[k];
 
@@ -51,8 +90,9 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query) {
         queue.clear();
         for (const int stop : marked) {
             is_marked[stop] = 0;
-            for (int i = timetable.stop_pattern_offsets[stop];
-                 i < timetable.stop_pattern_offsets[stop + 1]; ++i) {
+            const int first = timetable.stop_pattern_offsets[stop];
+            const int last = timetable.stop_pattern_offsets[stop + 1];
+            for (int i = first; i != last; ++i) {
                 const PatternStop& entry = timetable.stop_patterns[i];
                 int& start = pattern_start[entry.pattern];
                 if (start == -1) {
@@ -70,7 +110,7 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query) {
             int trip = -1;
             int board = -1;
 
-            for (int position = pattern_start[p]; position < pattern.stop_count; ++position) {
+            for (int position = pattern_start[p]; position != pattern.stop_count; ++position) {
                 const int stop = timetable.stop_at(pattern, position);
 
                 if (trip != -1) {
@@ -78,10 +118,7 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query) {
                     if (arrival < std::min(best[stop], best[query.target])) {
                         current[stop] = Label{arrival, p, trip, board};
                         best[stop] = arrival;
-                        if (!is_marked[stop]) {
-                            is_marked[stop] = 1;
-                            marked.push_back(stop);
-                        }
+                        mark(stop, is_marked, marked);
                     }
                 }
 
@@ -93,19 +130,25 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query) {
                 const int ready = k == 1 ? reached : reached + query.transfer_buffer;
                 if (trip == -1 || ready <= timetable.departure(pattern, trip, position)) {
                     const int candidate = earliest_trip(timetable, pattern, position, ready);
-                    if (candidate != -1 && (trip == -1 || candidate < trip)) {
-                        trip = candidate;
-                        board = position;
+                    if (candidate != -1 && (trip == -1 || candidate != trip)) {
+                        if (trip == -1 || candidate < trip) {
+                            trip = candidate;
+                            board = position;
+                        }
                     }
                 }
             }
 
             pattern_start[p] = -1;
         }
+
+        if (transfers) {
+            relax_footpaths(*transfers, query.target, current, best, is_marked, marked);
+        }
     }
 
     int best_so_far = kUnreachable;
-    for (int k = 1; k <= query.max_trips; ++k) {
+    for (int k = 0; k != query.max_trips + 1; ++k) {
         const int arrival = result.rounds[k][query.target].arrival;
         if (arrival < best_so_far) {
             result.options.push_back(Option{k, arrival});
