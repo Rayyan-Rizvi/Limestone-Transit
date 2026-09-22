@@ -12,6 +12,7 @@ add_library(limestone_lib
     src/csv.cpp
     src/feed.cpp
     src/interner.cpp
+    src/journey.cpp
     src/loader.cpp
     src/raptor.cpp
     src/time.cpp

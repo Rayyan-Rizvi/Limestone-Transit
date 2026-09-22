@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "limestone/feed.hpp"
+#include "limestone/journey.hpp"
 #include "limestone/raptor.hpp"
 #include "limestone/timetable.hpp"
 #include "limestone/transfers.hpp"
@@ -126,4 +127,56 @@ TEST(RaptorWalking, WalksFromOriginToNearbyBay) {
     ASSERT_EQ(result.options.size(), 1u);
     EXPECT_EQ(result.options[0].trips, 1);
     EXPECT_EQ(result.options[0].arrival, hm(8, 30));
+}
+
+TEST(Journey, ReconstructsRideWalkRide) {
+    const limestone::Feed feed = walking_network();
+    const limestone::Timetable timetable = limestone::build_timetable(feed, kDate);
+    const limestone::Transfers transfers = limestone::build_transfers(feed);
+    const limestone::Query query = make_query(feed, "A", "D", hm(7, 55));
+
+    const limestone::RaptorResult result = limestone::run_raptor(timetable, query, &transfers);
+    const limestone::Journey journey = limestone::reconstruct_journey(timetable, result, query, 2);
+
+    ASSERT_EQ(journey.legs.size(), 3u);
+    EXPECT_EQ(journey.legs[0].kind, limestone::LegKind::Ride);
+    EXPECT_EQ(journey.legs[0].from_stop, feed.stop_ids.lookup("A"));
+    EXPECT_EQ(journey.legs[0].depart, hm(8, 0));
+    EXPECT_EQ(journey.legs[1].kind, limestone::LegKind::Walk);
+    EXPECT_EQ(journey.legs[1].to_stop, feed.stop_ids.lookup("B2"));
+    EXPECT_EQ(journey.legs[2].kind, limestone::LegKind::Ride);
+    EXPECT_EQ(journey.legs[2].depart, hm(8, 15));
+    EXPECT_EQ(journey.legs[2].arrive, hm(8, 30));
+}
+
+TEST(Journey, StartsWithWalkToNearbyBay) {
+    const limestone::Feed feed = walking_network();
+    const limestone::Timetable timetable = limestone::build_timetable(feed, kDate);
+    const limestone::Transfers transfers = limestone::build_transfers(feed);
+    const limestone::Query query = make_query(feed, "B", "D", hm(8, 0));
+
+    const limestone::RaptorResult result = limestone::run_raptor(timetable, query, &transfers);
+    const limestone::Journey journey = limestone::reconstruct_journey(timetable, result, query, 1);
+
+    ASSERT_EQ(journey.legs.size(), 2u);
+    EXPECT_EQ(journey.legs[0].kind, limestone::LegKind::Walk);
+    EXPECT_EQ(journey.legs[0].depart, hm(8, 0));
+    EXPECT_EQ(journey.legs[0].arrive, hm(8, 0) + 109);
+    EXPECT_EQ(journey.legs[1].route, feed.route_ids.lookup("Y"));
+}
+
+TEST(Journey, LegsConnectEndToEnd) {
+    const limestone::Feed feed = walking_network();
+    const limestone::Timetable timetable = limestone::build_timetable(feed, kDate);
+    const limestone::Transfers transfers = limestone::build_transfers(feed);
+    const limestone::Query query = make_query(feed, "A", "D", hm(7, 55));
+
+    const limestone::RaptorResult result = limestone::run_raptor(timetable, query, &transfers);
+    const limestone::Journey journey = limestone::reconstruct_journey(timetable, result, query, 2);
+
+    EXPECT_EQ(journey.legs.front().from_stop, query.source);
+    EXPECT_EQ(journey.legs.back().to_stop, query.target);
+    for (std::size_t i = 0; i + 1 != journey.legs.size(); ++i) {
+        EXPECT_EQ(journey.legs[i].to_stop, journey.legs[i + 1].from_stop);
+    }
 }
