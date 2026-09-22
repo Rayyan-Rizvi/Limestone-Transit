@@ -14,6 +14,7 @@ add_library(limestone_lib
     src/interner.cpp
     src/journey.cpp
     src/loader.cpp
+    src/map.cpp
     src/raptor.cpp
     src/sweep.cpp
     src/time.cpp
@@ -43,6 +44,7 @@ add_executable(limestone_tests
     tests/test_csv.cpp
     tests/test_feed.cpp
     tests/test_loader.cpp
+    tests/test_map.cpp
     tests/test_multisource.cpp
     tests/test_raptor.cpp
     tests/test_sweep.cpp
