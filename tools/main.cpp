@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -10,6 +11,7 @@
 #include "limestone/journey.hpp"
 #include "limestone/loader.hpp"
 #include "limestone/raptor.hpp"
+#include "limestone/sweep.hpp"
 #include "limestone/time.hpp"
 #include "limestone/timetable.hpp"
 #include "limestone/transfers.hpp"
@@ -33,6 +35,7 @@ int print_usage() {
               << "  limestone stops FEED_DIR QUERY\n"
               << "  limestone route FEED_DIR FROM TO YYYYMMDD HH:MM\n"
               << "  limestone reach FEED_DIR LAT,LON YYYYMMDD HH:MM\n"
+              << "  limestone sweep FEED_DIR LAT,LON YYYYMMDD OUT.csv [THREADS]\n"
               << "  limestone --version\n"
               << "\n"
               << "FROM and TO may be stop ids or stop names. Quote names with spaces.\n";
@@ -302,6 +305,91 @@ int run_reach(const std::string& directory, const std::string& point,
     return 0;
 }
 
+int run_sweep_command(const std::string& directory, const std::string& point,
+                      const std::string& date_text, const std::string& output_path, int threads) {
+    double lat = 0.0;
+    double lon = 0.0;
+    if (!parse_point(point, lat, lon)) {
+        throw std::runtime_error("point must be LAT,LON with no space, got " + point);
+    }
+    if (date_text.size() != 8) {
+        throw std::runtime_error("date must be YYYYMMDD, got " + date_text);
+    }
+    const int date = std::atoi(date_text.c_str());
+
+    const limestone::Feed feed = limestone::load_feed(directory);
+
+    constexpr double kOriginRadiusMetres = 500.0;
+    const std::vector<limestone::NearbyStop> nearby =
+        limestone::stops_near(feed, lat, lon, kOriginRadiusMetres);
+    if (nearby.empty()) {
+        throw std::runtime_error("no stops within 500 m of " + point);
+    }
+
+    std::vector<limestone::Origin> origins;
+    for (const limestone::NearbyStop& stop : nearby) {
+        origins.push_back(limestone::Origin{stop.stop, stop.seconds});
+    }
+
+    const limestone::Timetable timetable = limestone::build_timetable(feed, date);
+    if (timetable.patterns.empty()) {
+        std::cout << "no service runs on " << date << " (check the date range with info)\n";
+        return 1;
+    }
+    const limestone::Transfers transfers = limestone::build_transfers(feed);
+
+    limestone::SweepOptions options;
+    options.threads = threads;
+
+    const Clock::time_point started = Clock::now();
+    const limestone::SweepResult result =
+        limestone::run_sweep(timetable, transfers, origins, options);
+    const long long elapsed_ms = milliseconds_since(started);
+
+    std::ofstream out(output_path);
+    if (!out) {
+        throw std::runtime_error("cannot write " + output_path);
+    }
+    out << "stop_id,stop_name,lat,lon,reached,samples,median_minutes,best_minutes\n";
+
+    int always = 0;
+    int never = 0;
+    for (std::size_t s = 0; s != result.stops.size(); ++s) {
+        const limestone::StopAccess& access = result.stops[s];
+        const limestone::Stop& stop = feed.stops[s];
+
+        if (access.reached == access.samples) {
+            ++always;
+        }
+        if (access.reached == 0) {
+            ++never;
+        }
+
+        out << feed.stop_ids.name(static_cast<int>(s)) << ",\"" << stop.name << "\"," << stop.lat
+            << ',' << stop.lon << ',' << access.reached << ',' << access.samples << ',';
+        if (access.median_seconds < 0) {
+            out << ",";
+        } else {
+            out << (access.median_seconds + 30) / 60 << ',' << (access.best_seconds + 30) / 60;
+        }
+        out << '\n';
+    }
+
+    const long long queries = static_cast<long long>(result.departures);
+    std::cout << "origin:      " << point << " (" << nearby.size() << " stops within 500 m)\n"
+              << "date:        " << date << '\n'
+              << "departures:  " << queries << '\n'
+              << "threads:     " << threads << '\n'
+              << "elapsed:     " << elapsed_ms << " ms\n"
+              << "per query:   " << (elapsed_ms * 1000.0 / static_cast<double>(queries))
+              << " microseconds\n"
+              << "always:      " << always << " stops reachable from every departure\n"
+              << "never:       " << never << " stops never reachable\n"
+              << "written to:  " << output_path << '\n';
+
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         return print_usage();
@@ -326,6 +414,11 @@ int main(int argc, char* argv[]) {
 
         if (command == "reach" && argc == 6) {
             return run_reach(argv[2], argv[3], argv[4], argv[5]);
+        }
+
+        if (command == "sweep" && (argc == 6 || argc == 7)) {
+            const int threads = argc == 7 ? std::atoi(argv[6]) : 1;
+            return run_sweep_command(argv[2], argv[3], argv[4], argv[5], threads);
         }
 
     } catch (const std::exception& error) {
