@@ -29,8 +29,17 @@ struct Transfers {
     std::size_t size() const { return paths.size(); }
 };
 
+struct NearbyStop {
+    int stop = 0;
+    int seconds = 0;
+};
+
 double haversine_metres(double lat1, double lon1, double lat2, double lon2);
 
 Transfers build_transfers(const Feed& feed, const WalkingOptions& options = WalkingOptions{});
+
+// Every stop within radius_metres of a point, with the time to walk there.
+std::vector<NearbyStop> stops_near(const Feed& feed, double lat, double lon, double radius_metres,
+                                   const WalkingOptions& options = WalkingOptions{});
 
 }

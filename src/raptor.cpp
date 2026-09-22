@@ -1,6 +1,7 @@
 #include "limestone/raptor.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace limestone {
 namespace {
@@ -21,6 +22,10 @@ int earliest_trip(const Timetable& timetable, const Pattern& pattern, int positi
     return low != pattern.trip_count ? low : -1;
 }
 
+int target_bound(const std::vector<int>& best, int target) {
+    return target == kNoTarget ? kUnreachable : best[target];
+}
+
 void mark(int stop, std::vector<char>& is_marked, std::vector<int>& marked) {
     if (!is_marked[stop]) {
         is_marked[stop] = 1;
@@ -29,7 +34,7 @@ void mark(int stop, std::vector<char>& is_marked, std::vector<int>& marked) {
 }
 
 // Walks start only from stops reached by riding in this round, or from the
-// origin, never from the far end of another walk.
+// origins, never from the far end of another walk.
 void relax_footpaths(const Transfers& transfers, int target, std::vector<Label>& labels,
                      std::vector<int>& best, std::vector<char>& is_marked,
                      std::vector<int>& marked) {
@@ -45,7 +50,7 @@ void relax_footpaths(const Transfers& transfers, int target, std::vector<Label>&
         for (int j = transfers.offsets[from]; j != transfers.offsets[from + 1]; ++j) {
             const Footpath& path = transfers.paths[j];
             const int arrival = leave_at + path.seconds;
-            if (arrival >= std::min(best[path.to], best[target])) {
+            if (arrival >= std::min(best[path.to], target_bound(best, target))) {
                 continue;
             }
 
@@ -71,12 +76,26 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query,
     std::vector<int> pattern_start(timetable.patterns.size(), -1);
     std::vector<int> queue;
 
-    result.rounds[0][query.source].arrival = query.departure;
-    best[query.source] = query.departure;
-    mark(query.source, is_marked, marked);
+    std::vector<Label>& origin_labels = result.rounds[0];
+    const auto seed = [&](int stop, int departure) {
+        if (departure >= origin_labels[stop].arrival) {
+            return;
+        }
+        origin_labels[stop].arrival = departure;
+        best[stop] = departure;
+        mark(stop, is_marked, marked);
+    };
+
+    if (query.origins.empty()) {
+        seed(query.source, query.departure);
+    } else {
+        for (const Origin& origin : query.origins) {
+            seed(origin.stop, origin.departure);
+        }
+    }
 
     if (transfers) {
-        relax_footpaths(*transfers, query.target, result.rounds[0], best, is_marked, marked);
+        relax_footpaths(*transfers, query.target, origin_labels, best, is_marked, marked);
     }
 
     for (int k = 1; k != query.max_trips + 1 && !marked.empty(); ++k) {
@@ -115,7 +134,7 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query,
 
                 if (trip != -1) {
                     const int arrival = timetable.arrival(pattern, trip, position);
-                    if (arrival < std::min(best[stop], best[query.target])) {
+                    if (arrival < std::min(best[stop], target_bound(best, query.target))) {
                         current[stop] = Label{arrival, p, trip, board};
                         best[stop] = arrival;
                         mark(stop, is_marked, marked);
@@ -130,11 +149,9 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query,
                 const int ready = k == 1 ? reached : reached + query.transfer_buffer;
                 if (trip == -1 || ready <= timetable.departure(pattern, trip, position)) {
                     const int candidate = earliest_trip(timetable, pattern, position, ready);
-                    if (candidate != -1 && (trip == -1 || candidate != trip)) {
-                        if (trip == -1 || candidate < trip) {
-                            trip = candidate;
-                            board = position;
-                        }
+                    if (candidate != -1 && (trip == -1 || candidate < trip)) {
+                        trip = candidate;
+                        board = position;
                     }
                 }
             }
@@ -147,15 +164,18 @@ RaptorResult run_raptor(const Timetable& timetable, const Query& query,
         }
     }
 
-    int best_so_far = kUnreachable;
-    for (int k = 0; k != query.max_trips + 1; ++k) {
-        const int arrival = result.rounds[k][query.target].arrival;
-        if (arrival < best_so_far) {
-            result.options.push_back(Option{k, arrival});
-            best_so_far = arrival;
+    if (query.target != kNoTarget) {
+        int best_so_far = kUnreachable;
+        for (int k = 0; k != query.max_trips + 1; ++k) {
+            const int arrival = result.rounds[k][query.target].arrival;
+            if (arrival < best_so_far) {
+                result.options.push_back(Option{k, arrival});
+                best_so_far = arrival;
+            }
         }
     }
 
+    result.best = std::move(best);
     return result;
 }
 

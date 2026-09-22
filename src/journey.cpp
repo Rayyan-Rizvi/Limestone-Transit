@@ -37,9 +37,10 @@ Journey reconstruct_journey(const Timetable& timetable, const RaptorResult& resu
             continue;
         }
 
+        // Only seeded origins carry a label that is neither a ride nor a walk.
         if (label.pattern == -1) {
-            if (stop != query.source) {
-                throw std::runtime_error("journey reconstruction ended away from the origin");
+            if (label.arrival == kUnreachable) {
+                throw std::runtime_error("journey reconstruction reached an unreached stop");
             }
             std::reverse(journey.legs.begin(), journey.legs.end());
             return journey;

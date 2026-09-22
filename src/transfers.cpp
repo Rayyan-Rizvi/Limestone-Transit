@@ -17,6 +17,11 @@ bool has_coordinates(const Stop& stop) {
     return stop.lat != 0.0 || stop.lon != 0.0;
 }
 
+int walking_seconds(double metres, const WalkingOptions& options) {
+    const double walked = metres * options.detour_factor / options.metres_per_second;
+    return std::max(options.minimum_seconds, static_cast<int>(std::ceil(walked)));
+}
+
 }
 
 double haversine_metres(double lat1, double lon1, double lat2, double lon2) {
@@ -52,8 +57,7 @@ Transfers build_transfers(const Feed& feed, const WalkingOptions& options) {
                 continue;
             }
 
-            const double walked = metres * options.detour_factor / options.metres_per_second;
-            const int seconds = std::max(options.minimum_seconds, static_cast<int>(std::ceil(walked)));
+            const int seconds = walking_seconds(metres, options);
             adjacency[a].push_back(Footpath{b, seconds});
             adjacency[b].push_back(Footpath{a, seconds});
         }
@@ -67,6 +71,27 @@ Transfers build_transfers(const Feed& feed, const WalkingOptions& options) {
     }
 
     return transfers;
+}
+
+std::vector<NearbyStop> stops_near(const Feed& feed, double lat, double lon, double radius_metres,
+                                   const WalkingOptions& options) {
+    std::vector<NearbyStop> nearby;
+
+    for (std::size_t s = 0; s != feed.stops.size(); ++s) {
+        const Stop& stop = feed.stops[s];
+        if (!has_coordinates(stop)) {
+            continue;
+        }
+
+        const double metres = haversine_metres(lat, lon, stop.lat, stop.lon);
+        if (metres > radius_metres) {
+            continue;
+        }
+
+        nearby.push_back(NearbyStop{static_cast<int>(s), walking_seconds(metres, options)});
+    }
+
+    return nearby;
 }
 
 }
