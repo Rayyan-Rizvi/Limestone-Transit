@@ -10,6 +10,7 @@
 
 #include "limestone/journey.hpp"
 #include "limestone/loader.hpp"
+#include "limestone/map.hpp"
 #include "limestone/raptor.hpp"
 #include "limestone/sweep.hpp"
 #include "limestone/time.hpp"
@@ -36,6 +37,7 @@ int print_usage() {
               << "  limestone route FEED_DIR FROM TO YYYYMMDD HH:MM\n"
               << "  limestone reach FEED_DIR LAT,LON YYYYMMDD HH:MM\n"
               << "  limestone sweep FEED_DIR LAT,LON YYYYMMDD OUT.csv [THREADS]\n"
+              << "  limestone map FEED_DIR LAT,LON YYYYMMDD OUT.svg [HH:MM] [THREADS]\n"
               << "  limestone --version\n"
               << "\n"
               << "FROM and TO may be stop ids or stop names. Quote names with spaces.\n";
@@ -390,6 +392,100 @@ int run_sweep_command(const std::string& directory, const std::string& point,
     return 0;
 }
 
+int run_map(const std::string& directory, const std::string& point, const std::string& date_text,
+            const std::string& output_path, const std::string& time_text, int threads) {
+    double lat = 0.0;
+    double lon = 0.0;
+    if (!parse_point(point, lat, lon)) {
+        throw std::runtime_error("point must be LAT,LON with no space, got " + point);
+    }
+    if (date_text.size() != 8) {
+        throw std::runtime_error("date must be YYYYMMDD, got " + date_text);
+    }
+    const int date = std::atoi(date_text.c_str());
+
+    const limestone::Feed feed = limestone::load_feed(directory);
+
+    constexpr double kOriginRadiusMetres = 500.0;
+    const std::vector<limestone::NearbyStop> nearby =
+        limestone::stops_near(feed, lat, lon, kOriginRadiusMetres);
+    if (nearby.empty()) {
+        throw std::runtime_error("no stops within 500 m of " + point);
+    }
+
+    const limestone::Timetable timetable = limestone::build_timetable(feed, date);
+    if (timetable.patterns.empty()) {
+        std::cout << "no service runs on " << date << " (check the date range with info)\n";
+        return 1;
+    }
+    const limestone::Transfers transfers = limestone::build_transfers(feed);
+
+    std::vector<int> minutes(feed.stops.size(), -1);
+    std::string subtitle;
+
+    if (time_text.empty()) {
+        std::vector<limestone::Origin> origins;
+        for (const limestone::NearbyStop& stop : nearby) {
+            origins.push_back(limestone::Origin{stop.stop, stop.seconds});
+        }
+
+        limestone::SweepOptions options;
+        options.threads = threads;
+        const limestone::SweepResult result =
+            limestone::run_sweep(timetable, transfers, origins, options);
+
+        for (std::size_t s = 0; s != minutes.size(); ++s) {
+            const limestone::StopAccess& access = result.stops[s];
+            if (access.median_seconds >= 0) {
+                minutes[s] = (access.median_seconds + 30) / 60;
+            }
+        }
+        subtitle = "median travel time across " + std::to_string(result.departures) +
+                   " departures, 06:00 to 23:59, " + date_text;
+    } else {
+        const std::optional<int> departure = limestone::parse_gtfs_time(time_text);
+        if (!departure) {
+            throw std::runtime_error("time must be HH:MM, got " + time_text);
+        }
+
+        limestone::Query query;
+        query.target = limestone::kNoTarget;
+        query.departure = *departure;
+        for (const limestone::NearbyStop& stop : nearby) {
+            query.origins.push_back(limestone::Origin{stop.stop, *departure + stop.seconds});
+        }
+
+        const limestone::RaptorResult result = limestone::run_raptor(timetable, query, &transfers);
+        for (std::size_t s = 0; s != minutes.size(); ++s) {
+            if (result.best[s] != limestone::kUnreachable) {
+                minutes[s] = (result.best[s] - query.departure + 30) / 60;
+            }
+        }
+        subtitle = "leaving at " + limestone::format_hhmm(*departure) + ", " + date_text;
+    }
+
+    std::vector<limestone::MapPoint> points;
+    int unreachable = 0;
+    for (std::size_t s = 0; s != feed.stops.size(); ++s) {
+        const limestone::Stop& stop = feed.stops[s];
+        if (stop.lat == 0.0 && stop.lon == 0.0) {
+            continue;
+        }
+        points.push_back(limestone::MapPoint{stop.lat, stop.lon, minutes[s]});
+        if (minutes[s] < 0) {
+            ++unreachable;
+        }
+    }
+
+    limestone::write_svg_map(output_path, points, lat, lon, "Kingston Transit travel time",
+                             subtitle);
+
+    std::cout << "stops plotted: " << points.size() << '\n'
+              << "unreachable:   " << unreachable << '\n'
+              << "written to:    " << output_path << '\n';
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         return print_usage();
@@ -419,6 +515,20 @@ int main(int argc, char* argv[]) {
         if (command == "sweep" && (argc == 6 || argc == 7)) {
             const int threads = argc == 7 ? std::atoi(argv[6]) : 1;
             return run_sweep_command(argv[2], argv[3], argv[4], argv[5], threads);
+        }
+
+                if (command == "map" && argc >= 6 && argc <= 8) {
+            std::string time_text;
+            int threads = 4;
+            for (int i = 6; i != argc; ++i) {
+                const std::string argument = argv[i];
+                if (argument.find(':') != std::string::npos) {
+                    time_text = argument;
+                } else {
+                    threads = std::atoi(argument.c_str());
+                }
+            }
+            return run_map(argv[2], argv[3], argv[4], argv[5], time_text, threads);
         }
 
     } catch (const std::exception& error) {
