@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -10,10 +10,10 @@
 namespace {
 
 std::string write_temp_file(const std::string& name, const std::string& contents) {
-    const std::string path = std::string(std::tmpnam(nullptr)) + name;
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / ("limestone_" + name);
     std::ofstream out(path, std::ios::binary);
     out << contents;
-    return path;
+    return path.string();
 }
 
 }
