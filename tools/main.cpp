@@ -7,12 +7,13 @@
 #include <string>
 #include <vector>
 
+#include "limestone/journey.hpp"
 #include "limestone/loader.hpp"
 #include "limestone/raptor.hpp"
 #include "limestone/time.hpp"
 #include "limestone/timetable.hpp"
-#include "limestone/version.hpp"
 #include "limestone/transfers.hpp"
+#include "limestone/version.hpp"
 
 namespace {
 
@@ -30,8 +31,10 @@ int print_usage() {
     std::cerr << "usage:\n"
               << "  limestone info FEED_DIR\n"
               << "  limestone stops FEED_DIR QUERY\n"
-              << "  limestone route FEED_DIR FROM_STOP_ID TO_STOP_ID YYYYMMDD HH:MM\n"
-              << "  limestone --version\n";
+              << "  limestone route FEED_DIR FROM TO YYYYMMDD HH:MM\n"
+              << "  limestone --version\n"
+              << "\n"
+              << "FROM and TO may be stop ids or stop names. Quote names with spaces.\n";
     return 2;
 }
 
@@ -54,12 +57,15 @@ int run_info(const std::string& directory) {
         last_date = std::max(last_date, dates.back());
     }
 
+    const limestone::Transfers transfers = limestone::build_transfers(feed);
+
     std::cout << "feed:        " << directory << '\n'
               << "stops:       " << feed.stops.size() << '\n'
               << "routes:      " << feed.routes.size() << '\n'
               << "trips:       " << feed.trips.size() << '\n'
               << "stop times:  " << feed.stop_times.size() << '\n'
               << "services:    " << feed.service_ids.size() << '\n'
+              << "footpaths:   " << transfers.size() << '\n'
               << "dates:       " << first_date << " to " << last_date << '\n'
               << "load time:   " << load_ms << " ms\n";
 
@@ -89,12 +95,57 @@ int run_stops(const std::string& directory, const std::string& query) {
     return 0;
 }
 
-int resolve_stop(const limestone::Feed& feed, const std::string& id) {
-    const int index = feed.stop_ids.lookup(id);
-    if (index == limestone::Interner::kMissing) {
-        throw std::runtime_error("unknown stop id " + id + " (use the stops command to find ids)");
+// Accepts either a stop id or a stop name. Ids win, so a stop whose name
+// happens to look like another stop's id is still reachable by id.
+int resolve_stop(const limestone::Feed& feed, const std::string& text) {
+    const int by_id = feed.stop_ids.lookup(text);
+    if (by_id != limestone::Interner::kMissing) {
+        return by_id;
     }
-    return index;
+
+    const int by_name = feed.find_stop_by_name(text);
+    if (by_name != -1) {
+        return by_name;
+    }
+
+    throw std::runtime_error("no stop matches \"" + text + "\" (try the stops command)");
+}
+
+std::string describe_trips(int trips) {
+    if (trips == 0) {
+        return "walk only";
+    }
+    return std::to_string(trips) + (trips == 1 ? " bus" : " buses");
+}
+
+void print_journey(const limestone::Feed& feed, const limestone::Journey& journey) {
+    std::cout << "  " << describe_trips(journey.trips) << ", arrive "
+              << limestone::format_hhmm(journey.arrival) << '\n';
+
+    for (const limestone::Leg& leg : journey.legs) {
+        const std::string& from = feed.stops[leg.from_stop].name;
+        const std::string& to = feed.stops[leg.to_stop].name;
+
+        if (leg.kind == limestone::LegKind::Walk) {
+            const int minutes = std::max(1, (leg.arrive - leg.depart + 59) / 60);
+            std::cout << "    " << limestone::format_hhmm(leg.depart) << "  walk " << minutes
+                      << " min to " << to << " (" << feed.stop_ids.name(leg.to_stop) << ")\n";
+            continue;
+        }
+
+        const limestone::Route& route = feed.routes[leg.route];
+        const std::string& route_name = route.short_name.empty() ? route.long_name : route.short_name;
+        const std::string& headsign = feed.trips[leg.trip].headsign;
+
+        std::cout << "    " << limestone::format_hhmm(leg.depart) << "  board route " << route_name;
+        if (!headsign.empty()) {
+            std::cout << " (" << headsign << ")";
+        }
+        std::cout << " at " << from << " (" << feed.stop_ids.name(leg.from_stop) << ")\n";
+
+        std::cout << "    " << limestone::format_hhmm(leg.arrive) << "  get off at " << to
+                  << " (" << feed.stop_ids.name(leg.to_stop) << ")\n";
+    }
 }
 
 int run_route(const std::string& directory, const std::string& from, const std::string& to,
@@ -131,21 +182,27 @@ int run_route(const std::string& directory, const std::string& from, const std::
     const limestone::RaptorResult result = limestone::run_raptor(timetable, query, &transfers);
     const long long query_us = microseconds_since(started);
 
-    std::cout << "from:      " << from << "  " << feed.stops[query.source].name << '\n'
-              << "to:        " << to << "  " << feed.stops[query.target].name << '\n'
+    std::cout << "from:      " << feed.stop_ids.name(query.source) << "  "
+              << feed.stops[query.source].name << '\n'
+              << "to:        " << feed.stop_ids.name(query.target) << "  "
+              << feed.stops[query.target].name << '\n'
               << "departing: " << date << " at " << limestone::format_hhmm(query.departure) << '\n'
-              << "patterns:  " << timetable.patterns.size() << " (built in " << build_ms << " ms)\n\n";
+              << "patterns:  " << timetable.patterns.size() << " (built in " << build_ms << " ms)\n"
+              << "query:     " << query_us << " microseconds\n";
 
     if (result.options.empty()) {
-        std::cout << "  no journey found\n";
-    }
-    for (const limestone::Option& option : result.options) {
-        std::cout << "  " << option.trips << (option.trips == 1 ? " bus:    " : " buses:  ")
-                  << "arrive " << limestone::format_hhmm(option.arrival) << '\n';
+        std::cout << "\n  no journey found\n";
+        return 1;
     }
 
-    std::cout << "\nquery:     " << query_us << " microseconds\n";
-    return result.options.empty() ? 1 : 0;
+    for (const limestone::Option& option : result.options) {
+        const limestone::Journey journey =
+            limestone::reconstruct_journey(timetable, result, query, option.trips);
+        std::cout << '\n';
+        print_journey(feed, journey);
+    }
+
+    return 0;
 }
 
 }
