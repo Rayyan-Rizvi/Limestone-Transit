@@ -13,7 +13,9 @@ add_library(limestone_lib
     src/feed.cpp
     src/interner.cpp
     src/loader.cpp
+    src/raptor.cpp
     src/time.cpp
+    src/timetable.cpp
     src/version.cpp
 )
 target_include_directories(limestone_lib PUBLIC include)
@@ -36,6 +38,7 @@ add_executable(limestone_tests
     tests/test_csv.cpp
     tests/test_feed.cpp
     tests/test_loader.cpp
+    tests/test_raptor.cpp
     tests/test_time.cpp
     tests/test_version.cpp
 )
